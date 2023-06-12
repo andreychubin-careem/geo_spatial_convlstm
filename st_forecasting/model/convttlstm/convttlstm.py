@@ -96,24 +96,24 @@ class ConvTTLSTMNet(nn.Module):
         # stack the convolutional-LSTM layers with skip connections
         self.layers = nn.ModuleDict()
         for b in range(self.num_blocks):
-            for i in range(layers_per_block[b]):
+            for i in range(self.layers_per_block[b]):
                 # number of input channels to the current layer
                 if i > 0:
-                    channels = hidden_channels[b]
+                    channels = self.hidden_channels[b]
                 elif b == 0:  # if l == 0 and b == 0:
                     channels = input_channels
                 else:  # if l == 0 and b > 0:
-                    channels = hidden_channels[b - 1]
+                    channels = self.hidden_channels[b - 1]
                     if b > self.skip_stride:
-                        channels += hidden_channels[b - 1 - self.skip_stride]
+                        channels += self.hidden_channels[b - 1 - self.skip_stride]
 
                 lid = "b{}l{}".format(b, i)  # layer ID
-                self.layers[lid] = cell(channels, hidden_channels[b])
+                self.layers[lid] = cell(channels, self.hidden_channels[b])
 
         # number of input channels to the last layer (output layer)
-        channels = hidden_channels[-1]
+        channels = self.hidden_channels[-1]
         if self.num_blocks >= self.skip_stride:
-            channels += hidden_channels[-1 - self.skip_stride]
+            channels += self.hidden_channels[-1 - self.skip_stride]
 
         self.layers["output"] = nn.Conv2d(
             channels,
