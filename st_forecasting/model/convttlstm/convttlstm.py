@@ -29,9 +29,9 @@ class ConvTTLSTMNet(nn.Module):
             The number of channels for input video.
             Note: 3 for colored video, 1 for gray video.
         (Hyper-parameters of model architecture)
-        layers_per_block: list of ints
+        layers_per_block: Optional[int, Iterable[int]]
             Number of Conv-LSTM layers in each block.
-        hidden_channels: list of ints
+        hidden_channels: Optional[int, Iterable[int]]
             Number of output channels.
         Note: The length of hidden_channels (or layers_per_block) is equal to number of blocks.
         skip_stride: int
