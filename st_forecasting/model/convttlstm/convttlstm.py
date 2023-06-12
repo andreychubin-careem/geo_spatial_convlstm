@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Iterable
+from typing import Iterable, Optional
 
 from .convlstmcell import ConvTTLSTMCell
 
@@ -10,8 +10,8 @@ class ConvTTLSTMNet(nn.Module):
     def __init__(
             self,
             input_channels: int,
-            layers_per_block: Iterable[int],
-            hidden_channels: Iterable[int],
+            layers_per_block: Optional[int, Iterable[int]],
+            hidden_channels: Optional[int, Iterable[int]],
             skip_stride: int = None,
             cell_params: dict = {'order': 3, 'steps': 5, 'ranks': 8},
             kernel_size: int = 3,
@@ -70,8 +70,8 @@ class ConvTTLSTMNet(nn.Module):
         super(ConvTTLSTMNet, self).__init__()
 
         # Hyperparameters
-        self.layers_per_block = layers_per_block
-        self.hidden_channels = hidden_channels
+        self.layers_per_block = layers_per_block if isinstance(layers_per_block, Iterable) else [layers_per_block]
+        self.hidden_channels = hidden_channels if isinstance(hidden_channels, Iterable) else [hidden_channels]
         self.teacher_forcing = teacher_forcing
         self.scheduled_sampling_ratio = scheduled_sampling_ratio
 
