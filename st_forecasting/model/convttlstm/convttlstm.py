@@ -75,8 +75,8 @@ class ConvTTLSTMNet(nn.Module):
         self.teacher_forcing = teacher_forcing
         self.scheduled_sampling_ratio = scheduled_sampling_ratio
 
-        self.num_blocks = len(layers_per_block)
-        assert self.num_blocks == len(hidden_channels), "Invalid number of blocks."
+        self.num_blocks = len(self.layers_per_block)
+        assert self.num_blocks == len(self.hidden_channels), "Invalid number of blocks."
 
         self.skip_stride = (self.num_blocks + 1) if skip_stride is None else skip_stride
 
