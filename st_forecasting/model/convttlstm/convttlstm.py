@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Iterable, Optional
+from typing import Iterable, Union
 
 from .convlstmcell import ConvTTLSTMCell
 
@@ -10,8 +10,8 @@ class ConvTTLSTMNet(nn.Module):
     def __init__(
             self,
             input_channels: int,
-            layers_per_block: Optional[int, Iterable[int]],
-            hidden_channels: Optional[int, Iterable[int]],
+            layers_per_block: Union[int, Iterable[int]],
+            hidden_channels: Union[int, Iterable[int]],
             skip_stride: int = None,
             cell_params: dict = {'order': 3, 'steps': 5, 'ranks': 8},
             kernel_size: int = 3,
@@ -29,9 +29,9 @@ class ConvTTLSTMNet(nn.Module):
             The number of channels for input video.
             Note: 3 for colored video, 1 for gray video.
         (Hyper-parameters of model architecture)
-        layers_per_block: Optional[int, Iterable[int]]
+        layers_per_block: Union[int, Iterable[int]]
             Number of Conv-LSTM layers in each block.
-        hidden_channels: Optional[int, Iterable[int]]
+        hidden_channels: Union[int, Iterable[int]]
             Number of output channels.
         Note: The length of hidden_channels (or layers_per_block) is equal to number of blocks.
         skip_stride: int
