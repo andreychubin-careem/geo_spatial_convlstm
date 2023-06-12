@@ -5,4 +5,4 @@ Includes:
 - ConvGRU
 - ConvTTLSTM
 
-!!! This code has some MPS-specific parts that need be changed to run model training on CPU or GPU
+!!! This code has some MPS-specific parts that need to be changed to run model training on CPU or GPU
