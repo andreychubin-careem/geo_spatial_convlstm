@@ -1,6 +1,6 @@
 import torch
 import lightning as pl
-from typing import Union
+from typing import Optional
 from torch import nn
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
@@ -18,11 +18,11 @@ class ModelWrapper(pl.LightningModule):
             self,
             model: nn.Module,
             optimizer: Optimizer,
-            scheduler: LambdaLR = None,
+            scheduler: Optional[LambdaLR] = None,
             horizon: int = 1,
             loss_type: str = 'default',
             include_masked_metrics: bool = False,
-            loss_fn_alias: str = 'smape',
+            loss_fn_alias: str = 'mse',
             masked_weight: float = 0.7
     ):
         """
@@ -36,7 +36,8 @@ class ModelWrapper(pl.LightningModule):
         :param loss_type: what loss logic to use. ['default'|'masked'|'semi_masked']
         :param include_masked_metrics: whether to show metric values only for viable squares
         :param loss_fn_alias: alias for loss function ['smape'|'rmse'|'mse'|'mape'] (for 'rmse' MSE loss will be used)
-        :param masked_weight: weight used for masked loss in 'semi_masked' training
+        :param masked_weight: weight used for masked loss in 'semi_masked' training.
+        [0.0, 1.0], where 1.0 is equal to fully masked loss
         """
         super(ModelWrapper, self).__init__()
         self.save_hyperparameters()
@@ -57,7 +58,8 @@ class ModelWrapper(pl.LightningModule):
             elif self.loss_fn_alias == 'mape':
                 self.basic_loss_fn = mean_absolute_percentage_error
             elif self.loss_fn_alias in ['rmse', 'mse']:
-                print('mse will be used instead of rmse as basic loss function')
+                if self.loss_fn_alias == 'rmse':
+                    print('mse will be used instead of rmse as basic loss function')
                 self.basic_loss_fn = mean_squared_error
             else:
                 raise NotImplementedError(f'"{self.loss_fn_alias}" loss function is not implemented')
@@ -68,13 +70,18 @@ class ModelWrapper(pl.LightningModule):
             elif self.loss_fn_alias == 'mape':
                 self.loss_fn = mape
             elif self.loss_fn_alias in ['rmse', 'mse']:
-                print('mse will be used instead of rmse as masked loss function')
+                if self.loss_fn_alias == 'rmse':
+                    print('mse will be used instead of rmse as masked loss function')
                 self.loss_fn = mse
             else:
                 raise NotImplementedError(f'"{self.loss_fn_alias}" loss function is not implemented')
 
         self.metric_1 = mean_squared_error
         self.metric_2 = mean_absolute_percentage_error
+
+    @staticmethod
+    def _get_mask(x: Tensor) -> Tensor:
+        return torch.where(torch.sum(x, dim=1) > 0.0, 1.0, 0.0).unsqueeze(dim=1).to(x.dtype)
 
     def forward(self, x: Tensor) -> Tensor:
         output = self.model(x, horizon=self.horizon)
@@ -84,7 +91,7 @@ class ModelWrapper(pl.LightningModule):
         x, y = batch
 
         # TODO: move it to loader
-        mask = torch.where(torch.sum(x, dim=1) > 0.0, 1.0, 0.0).unsqueeze(dim=1).to(x.dtype)
+        mask = self._get_mask(x)
 
         y_hat = self.forward(x)
 
@@ -116,7 +123,7 @@ class ModelWrapper(pl.LightningModule):
         x, y = batch
 
         # TODO: move it to loader
-        mask = torch.where(torch.sum(x, dim=1) > 0.0, 1.0, 0.0).unsqueeze(dim=1).to(x.dtype)
+        mask = self._get_mask(x)
 
         y_hat = self.forward(x)
 
@@ -142,9 +149,12 @@ class ModelWrapper(pl.LightningModule):
             self.log('val_rmse(m)', m_rmse_value, on_step=False, on_epoch=True, prog_bar=True)
             self.log('val_mape(m)', m_mape_value, on_step=False, on_epoch=True, prog_bar=True)
 
-    def configure_optimizers(self) -> Union[Optimizer, dict]:
+    def configure_optimizers(self) -> dict:
         if self.scheduler is None:
-            return self.optimizer
+            return {
+                'optimizer': self.optimizer,
+                'monitor': 'val_loss'
+            }
         else:
             return {
                 'optimizer': self.optimizer,

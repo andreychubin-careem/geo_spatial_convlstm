@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Iterable, Union
+from typing import Iterable, Union, Optional
 
 from .convlstmcell import ConvTTLSTMCell
 
@@ -12,8 +12,8 @@ class ConvTTLSTMNet(nn.Module):
             input_channels: int,
             layers_per_block: Union[int, Iterable[int]],
             hidden_channels: Union[int, Iterable[int]],
-            skip_stride: int = None,
-            cell_params: dict = {'order': 3, 'steps': 5, 'ranks': 8},
+            skip_stride: Optional[int] = None,
+            cell_params: Optional[dict] = None,
             kernel_size: int = 3,
             bias: bool = True,
             teacher_forcing: bool = False,
@@ -70,6 +70,8 @@ class ConvTTLSTMNet(nn.Module):
         super(ConvTTLSTMNet, self).__init__()
 
         # Hyperparameters
+        if cell_params is None:
+            cell_params = {'order': 3, 'steps': 5, 'ranks': 8}
         self.layers_per_block = layers_per_block if isinstance(layers_per_block, Iterable) else [layers_per_block]
         self.hidden_channels = hidden_channels if isinstance(hidden_channels, Iterable) else [hidden_channels]
         self.teacher_forcing = teacher_forcing
@@ -125,12 +127,8 @@ class ConvTTLSTMNet(nn.Module):
 
         self.relu = nn.ReLU()
 
-    def autoencoder(
-            self,
-            inputs: Tensor,
-            seq_len: int,
-            horizon: int
-    ) -> Tensor:
+    def autoencoder(self, inputs: Tensor, seq_len: int, horizon: int) -> Tensor:
+        # TODO: include teacher_forcing support
         """
         Computation of Convolutional LSTM network.
 
@@ -157,6 +155,10 @@ class ConvTTLSTMNet(nn.Module):
             )
         else:  # if not teacher_forcing or scheduled_sampling_ratio < 1e-6:
             self.teacher_forcing = False
+            # dummy
+            teacher_forcing_mask = torch.bernoulli(
+                torch.ones(inputs.size(0), horizon - 1, 1, 1, 1, device=inputs.device)
+            )
 
         # the number of time steps in the computational graph
         total_steps = seq_len + horizon - 1
@@ -168,7 +170,7 @@ class ConvTTLSTMNet(nn.Module):
                 input_ = inputs[:, t]
             elif not self.teacher_forcing:
                 input_ = outputs[t - 1]
-            else:  # if t >= input_frames and teacher_forcing:
+            else:  # if t >= seq_len and teacher_forcing:
                 mask = teacher_forcing_mask[:, t - seq_len]
                 input_ = inputs[:, t] * mask + outputs[t - 1] * (1 - mask)
 
@@ -179,6 +181,7 @@ class ConvTTLSTMNet(nn.Module):
                     input_ = self.layers[lid](input_, first_step=(t == 0))
 
                 queue.append(input_)
+
                 if b >= self.skip_stride:
                     input_ = torch.cat([input_, queue.pop(0)], dim=1)  # concat over the channels
 
@@ -193,7 +196,13 @@ class ConvTTLSTMNet(nn.Module):
     def forward(self, inputs: Tensor, horizon: int) -> Tensor:
         b, seq_len, _, h, w = inputs.size()
 
+        if self.teacher_forcing:
+            seq_len = seq_len - horizon
+
         outputs = self.autoencoder(inputs, seq_len, horizon)
         outputs = self.relu(outputs)
 
         return outputs
+
+    def set_teacher_forcing(self, value: bool) -> None:
+        self.teacher_forcing = value

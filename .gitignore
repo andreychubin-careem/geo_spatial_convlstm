@@ -162,3 +162,5 @@ cython_debug/
 # Custom
 data
 amman_convttlstm_logs
+# amman_1H_convttlstm_logs
+catboost_info

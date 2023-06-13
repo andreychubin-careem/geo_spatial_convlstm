@@ -1,4 +1,4 @@
-def get_locations_data(date: str, service_area: int = 1) -> str:
+def get_intents(date: str, service_area: int = 1) -> str:
     return f"""
     with ios_radar_calls as (
         SELECT
@@ -45,4 +45,31 @@ def get_locations_data(date: str, service_area: int = 1) -> str:
         and ts is not null
         and latitude is not null
         and longitude is not null
+    """
+
+
+def get_food_demand(start_day: str, end_day: str, city_id: int) -> str:
+    return f"""
+        select
+            order_received_timestamp as ts,
+            cast(order_id as varchar) as order_id,
+            cast(booking_id as varchar) as booking_id,
+            cast(customer_id as varchar) as customer_id,
+            cast(captain_id as varchar) as captain_id,
+            cct_id,
+            cct,
+            order_type,
+            pickup_latitude,
+            pickup_longitude,
+            drop_off_latitude,
+            drop_off_longitude,
+            order_status,
+            cancellation_type,
+            cancelled_by,
+            cancellation_reason
+        from now_prod_dwh.orders
+        where 1=1
+            and day between date('{start_day}') and date('{end_day}')
+            and city_id = {city_id}
+            and delivery_type = 'careem'
     """

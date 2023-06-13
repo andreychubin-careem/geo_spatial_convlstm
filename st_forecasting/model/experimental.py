@@ -1,18 +1,17 @@
 import torch
 import torch.nn as nn
 
-from .layers import ConvLSTMCell
+from .convlstm.convlstmcell import ConvLSTMCell
 
 
 class SqueezeNet(nn.Module):
     """
     Not working :-) Unsqueezing does not learns properly
     """
-    def __init__(self, hidden_channels: int, n_steps_past: int, in_channels: int = 1):
+    def __init__(self, hidden_channels: int, in_channels: int = 1):
         super(SqueezeNet, self).__init__()
 
         self.hidden_channels = hidden_channels
-        self.batch_norm = nn.BatchNorm3d(n_steps_past)
 
         self.encoder = ConvLSTMCell(
             input_dim=in_channels,
@@ -91,7 +90,6 @@ class SqueezeNet(nn.Module):
 
     def forward(self, x: torch.Tensor, horizon: int = 0) -> torch.Tensor:
         mask = torch.where(torch.sum(x, dim=1) > 0, 1, 0).unsqueeze(dim=1).to(x.dtype)
-        x = self.batch_norm(x)
         b, seq_len, _, h, w = x.size()
 
         h_t1, c_t1 = self.encoder.init_hidden(batch_size=b, image_size=(h, w))
