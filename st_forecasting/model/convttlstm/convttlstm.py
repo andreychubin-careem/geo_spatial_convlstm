@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Iterable, Union, Optional
+from typing import Iterable
 
 from .convlstmcell import ConvTTLSTMCell
 
@@ -10,14 +10,13 @@ class ConvTTLSTMNet(nn.Module):
     def __init__(
             self,
             input_channels: int,
-            layers_per_block: Union[int, Iterable[int]],
-            hidden_channels: Union[int, Iterable[int]],
-            skip_stride: Optional[int] = None,
-            cell_params: Optional[dict] = None,
+            layers_per_block: Iterable[int],
+            hidden_channels: Iterable[int],
+            mask_features: int,
+            skip_stride: int = None,
+            cell_params: dict = {'order': 3, 'steps': 5, 'ranks': 8},
             kernel_size: int = 3,
-            bias: bool = True,
-            teacher_forcing: bool = False,
-            scheduled_sampling_ratio: int = 0
+            bias: bool = True
     ):
         """
         Initialization of a Conv-LSTM network.
@@ -29,9 +28,9 @@ class ConvTTLSTMNet(nn.Module):
             The number of channels for input video.
             Note: 3 for colored video, 1 for gray video.
         (Hyper-parameters of model architecture)
-        layers_per_block: Union[int, Iterable[int]]
+        layers_per_block: list of ints
             Number of Conv-LSTM layers in each block.
-        hidden_channels: Union[int, Iterable[int]]
+        hidden_channels: list of ints
             Number of output channels.
         Note: The length of hidden_channels (or layers_per_block) is equal to number of blocks.
         skip_stride: int
@@ -70,15 +69,11 @@ class ConvTTLSTMNet(nn.Module):
         super(ConvTTLSTMNet, self).__init__()
 
         # Hyperparameters
-        if cell_params is None:
-            cell_params = {'order': 3, 'steps': 5, 'ranks': 8}
-        self.layers_per_block = layers_per_block if isinstance(layers_per_block, Iterable) else [layers_per_block]
-        self.hidden_channels = hidden_channels if isinstance(hidden_channels, Iterable) else [hidden_channels]
-        self.teacher_forcing = teacher_forcing
-        self.scheduled_sampling_ratio = scheduled_sampling_ratio
+        self.layers_per_block = layers_per_block
+        self.hidden_channels = hidden_channels
 
-        self.num_blocks = len(self.layers_per_block)
-        assert self.num_blocks == len(self.hidden_channels), "Invalid number of blocks."
+        self.num_blocks = len(layers_per_block)
+        assert self.num_blocks == len(hidden_channels), "Invalid number of blocks."
 
         self.skip_stride = (self.num_blocks + 1) if skip_stride is None else skip_stride
 
@@ -98,24 +93,24 @@ class ConvTTLSTMNet(nn.Module):
         # stack the convolutional-LSTM layers with skip connections
         self.layers = nn.ModuleDict()
         for b in range(self.num_blocks):
-            for i in range(self.layers_per_block[b]):
+            for i in range(layers_per_block[b]):
                 # number of input channels to the current layer
                 if i > 0:
-                    channels = self.hidden_channels[b]
+                    channels = hidden_channels[b]
                 elif b == 0:  # if l == 0 and b == 0:
                     channels = input_channels
                 else:  # if l == 0 and b > 0:
-                    channels = self.hidden_channels[b - 1]
+                    channels = hidden_channels[b - 1]
                     if b > self.skip_stride:
-                        channels += self.hidden_channels[b - 1 - self.skip_stride]
+                        channels += hidden_channels[b - 1 - self.skip_stride]
 
                 lid = "b{}l{}".format(b, i)  # layer ID
-                self.layers[lid] = cell(channels, self.hidden_channels[b])
+                self.layers[lid] = cell(channels, hidden_channels[b])
 
         # number of input channels to the last layer (output layer)
-        channels = self.hidden_channels[-1]
+        channels = hidden_channels[-1]
         if self.num_blocks >= self.skip_stride:
-            channels += self.hidden_channels[-1 - self.skip_stride]
+            channels += hidden_channels[-1 - self.skip_stride]
 
         self.layers["output"] = nn.Conv2d(
             channels,
@@ -126,9 +121,27 @@ class ConvTTLSTMNet(nn.Module):
         )
 
         self.relu = nn.ReLU()
+        self.mask_layer = nn.Linear(
+            in_features=mask_features,
+            out_features=mask_features,
+            bias=False
+        )
 
-    def autoencoder(self, inputs: Tensor, seq_len: int, horizon: int) -> Tensor:
-        # TODO: include teacher_forcing support
+    def _get_mask(self, x: Tensor) -> Tensor:
+        init_shape = x.shape
+        x = nn.Flatten()(x)
+        x = self.mask_layer(x)
+        x = self.relu(x)
+        x = x.view(init_shape)
+        return x
+
+    def autoencoder(
+            self,
+            inputs: Tensor,
+            seq_len: int,
+            horizon: int,
+            mask: Tensor
+    ) -> Tensor:
         """
         Computation of Convolutional LSTM network.
 
@@ -147,19 +160,6 @@ class ConvTTLSTMNet(nn.Module):
             Output frames of the convolutional-LSTM module.
         """
 
-        # compute the teacher forcing mask
-        if self.teacher_forcing and self.scheduled_sampling_ratio > 1e-6:
-            # generate the teacher_forcing mask (4-th order)
-            teacher_forcing_mask = torch.bernoulli(
-                self.scheduled_sampling_ratio * torch.ones(inputs.size(0), horizon - 1, 1, 1, 1, device=inputs.device)
-            )
-        else:  # if not teacher_forcing or scheduled_sampling_ratio < 1e-6:
-            self.teacher_forcing = False
-            # dummy
-            teacher_forcing_mask = torch.bernoulli(
-                torch.ones(inputs.size(0), horizon - 1, 1, 1, 1, device=inputs.device)
-            )
-
         # the number of time steps in the computational graph
         total_steps = seq_len + horizon - 1
         outputs = [None] * total_steps
@@ -168,11 +168,8 @@ class ConvTTLSTMNet(nn.Module):
             # input_: 4-th order tensor of size [batch_size, input_channels, height, width]
             if t < seq_len:
                 input_ = inputs[:, t]
-            elif not self.teacher_forcing:
+            else:
                 input_ = outputs[t - 1]
-            else:  # if t >= seq_len and teacher_forcing:
-                mask = teacher_forcing_mask[:, t - seq_len]
-                input_ = inputs[:, t] * mask + outputs[t - 1] * (1 - mask)
 
             queue = []  # previous outputs for skip connection
             for b in range(self.num_blocks):
@@ -181,28 +178,21 @@ class ConvTTLSTMNet(nn.Module):
                     input_ = self.layers[lid](input_, first_step=(t == 0))
 
                 queue.append(input_)
-
                 if b >= self.skip_stride:
                     input_ = torch.cat([input_, queue.pop(0)], dim=1)  # concat over the channels
 
             # map the hidden states to predictive frames
-            outputs[t] = self.layers["output"](input_)
+            outputs[t] = self.layers["output"](input_) * mask
 
         # 5-th order tensor of size [batch_size, output_frames, channels, height, width]
         outputs = torch.stack([outputs[t] for t in range(horizon)], dim=1)
 
         return outputs
 
-    def forward(self, inputs: Tensor, horizon: int) -> Tensor:
+    def forward(self, inputs: Tensor, mask: Tensor, horizon: int) -> Tensor:
         b, seq_len, _, h, w = inputs.size()
-
-        if self.teacher_forcing:
-            seq_len = seq_len - horizon
-
-        outputs = self.autoencoder(inputs, seq_len, horizon)
+        mask = self._get_mask(mask)
+        outputs = self.autoencoder(inputs, seq_len, horizon, mask)
         outputs = self.relu(outputs)
 
         return outputs
-
-    def set_teacher_forcing(self, value: bool) -> None:
-        self.teacher_forcing = value

@@ -96,11 +96,15 @@ class ConvTTLSTMCell(nn.Module):
 
         # initialize both hidden and cell states to all zeros
         self.hidden_states = [
-            torch.zeros(batch_size, self.hidden_channels, height, width, device=device) for _ in range(self.steps)
+            torch.nn.init.kaiming_normal_(
+                torch.empty(batch_size, self.hidden_channels, height, width, device=device)
+            ) for _ in range(self.steps)
         ]
         self.hidden_pointer = 0  # pointing to the position to be updated
 
-        self.cell_states = torch.zeros(batch_size, self.hidden_channels, height, width, device=device)
+        self.cell_states = torch.nn.init.kaiming_normal_(
+            torch.empty(batch_size, self.hidden_channels, height, width, device=device)
+        )
 
     def forward(self, inputs: Tensor, first_step: bool = False) -> Tensor:
         """

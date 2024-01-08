@@ -13,11 +13,11 @@ class GeoFramesDataset(Dataset):
             self,
             x: np.ndarray,
             indexes: Union[list, np.ndarray],
-            n_steps_past: int,
+            memory: int,
             horizon: int,
             train: bool = True,
-            half: bool = False,
-            scaler: StandardScaler = None
+            scaler: StandardScaler = None,
+            masked: bool = True
     ):
         """
         PyTorch Dataset with spatio-temporal snapshots.
@@ -32,17 +32,17 @@ class GeoFramesDataset(Dataset):
         """
         self.data = x
         self.indexes = indexes
-        self.n_steps_past = n_steps_past
+        self.memory = memory
         self.horizon = horizon
         self.train = train
-        self.half = half
         self.scaler = scaler
+        self.masked = masked
 
     def __len__(self) -> int:
         return len(self.indexes)
 
-    def __getitem__(self, index: int) -> Union[Tuple[Tensor, Tensor], Tensor]:
-        x, y = to_timeseries(self.indexes[index], self.data, self.n_steps_past, self.horizon)
+    def __getitem__(self, index: int) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tensor]]:
+        x, y = to_timeseries(self.indexes[index], self.data, self.memory, self.horizon)
 
         assert x.sum() != 0.0, f'zero-sum-sequence appeared as x at index {index}'
         assert y.sum() != 0.0, f'zero-sum-sequence appeared as y at index {index}'
@@ -52,12 +52,14 @@ class GeoFramesDataset(Dataset):
         if self.scaler is not None:
             x = self.scaler.transform(x.flatten().reshape(-1, 1)).reshape(size)
 
-        x = torch.from_numpy(x)
-        
-        if self.half:
-            x = x.half()
+        x = torch.from_numpy(x).to(torch.float32)
+        mask = torch.sum(x, dim=0)
+
+        if self.masked:
+            eta = 1e-8
+            mask = torch.where(mask > 0.0, 1.0, eta).to(x.dtype)
         else:
-            x = x.to(torch.float32)
+            mask = torch.ones_like(mask)
 
         if self.train:
             y = torch.from_numpy(y)
@@ -65,13 +67,10 @@ class GeoFramesDataset(Dataset):
             if len(y.shape) == 3:
                 y = y.unsqueeze(dim=0)
             assert len(x.shape) == len(y.shape), 'Number of dimensions in x and y do not match!'
+
+            y = y.to(torch.float32)
             
-            if self.half:
-                y = y.half()
-            else:
-                y = y.to(torch.float32)
-            
-            return x, y
+            return x, mask, y
 
         else:
-            return x
+            return x, mask
